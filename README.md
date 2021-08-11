@@ -24,7 +24,7 @@
         - These two methods are thread safe.
         - Implemented thread-safety using ReentrantReadWriteLock.
         - These methods first acquire the write lock or wait until the write lock is available.
-        - After acquiring the write lock, we update the balance.
+        - After acquiring the write lock, updates the balance.
 
 #### Other Ways
     
