@@ -1,8 +1,10 @@
 package com.db.awmd.challenge.web;
 
 import com.db.awmd.challenge.domain.Account;
+import com.db.awmd.challenge.domain.Transaction;
+import com.db.awmd.challenge.domain.TransactionDetails;
 import com.db.awmd.challenge.service.AccountsService;
-import junit.framework.TestCase;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -10,15 +12,16 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.test.context.web.WebAppConfiguration;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.web.context.WebApplicationContext;
 
-import javax.validation.constraints.Max;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -66,86 +69,129 @@ public class TransactionControllerTest {
         this.accountsService.getAccountsRepository().clearAccounts();
     }
 
+    public TransactionDetails fromJson(String json) throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        return objectMapper.readValue(json, TransactionDetails.class);
+    }
+
     @Test
     public void makeTransaction() throws Exception {
         //Arrange and Act
-        this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":100}")).andExpect(status().isOk());
+        MvcResult result = this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":100}"))
+                .andReturn();
 
         //Assert
+        Assert.assertEquals(HttpStatus.OK.value(), result.getResponse().getStatus());
+        TransactionDetails details = fromJson(result.getResponse().getContentAsString());
+        Assert.assertNotNull(details.getTransactionId());
+        Assert.assertEquals("Transaction Successful!!", details.getMessage());
         Assert.assertEquals(new BigDecimal(100), this.accountsService.getAccount(ACC_ID_1).getBalance());
         Assert.assertEquals(new BigDecimal(300), this.accountsService.getAccount(ACC_ID_2).getBalance());
     }
 
     @Test
     public void makeTransactionMissingData() throws Exception {
-        this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"to\":\"2\",\"amount\":100}")).andExpect(status().isBadRequest());
+        //Arrange, Act and Assert
+        this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"to\":\"2\",\"amount\":100}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
     public void makeTransactionInvalidAmount() throws Exception {
-        this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":-100}")).andExpect(status().isBadRequest());
+        //Arrange, Act and Assert
+        this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":-100}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    public void makeTransactionWithZeroAmount() throws Exception {
+        //Arrange, Act and Assert
+        this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":0}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
     public void makeTransactionAmountGreaterThanBalance() throws Exception {
-        this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
+        //Arrange & Act
+        MvcResult result =  this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":1000}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(content().string("Insufficient Account Balance."));
+                .andReturn();
+
+        //Assert
+        Assert.assertEquals(HttpStatus.BAD_REQUEST.value(), result.getResponse().getStatus());
+        TransactionDetails details = fromJson(result.getResponse().getContentAsString());
+        Assert.assertEquals("Insufficient Account Balance.", details.getMessage());
     }
 
     @Test
     public void makeTransactionInvalidAccountId() throws Exception {
-        this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
+        //Arrange & Act
+        MvcResult result = this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"from\":\"4\",\"to\":\"2\",\"amount\":1000}"))
-                .andExpect(status().isNotFound())
-                .andExpect(content().string("Account does not exists for id = 4"));
+                .andReturn();
+
+        //Assert
+        Assert.assertEquals(HttpStatus.NOT_FOUND.value(), result.getResponse().getStatus());
+        TransactionDetails details = fromJson(result.getResponse().getContentAsString());
+        Assert.assertEquals("Account does not exists for id = 4", details.getMessage());
     }
 
     //Check Thread Safety
     @Test
     public void makeConcurrentTransactionCallsFromOneAccountToAnother() throws Exception {
+        //Arrange
         int transactionAmount = 5;
         int expected1Balance = INITIAL_BAL - transactionAmount * MAX_CALLS;
         int expected2Balance = INITIAL_BAL + transactionAmount * MAX_CALLS;
         
-        Collection<Callable<ResultActions>> calls = new ArrayList<>();
+        Collection<Callable<MvcResult>> calls = new ArrayList<>();
         IntStream.rangeClosed(1,MAX_CALLS).forEach(i -> {
-            calls.add(() -> this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":" +transactionAmount+ "}")));
+            calls.add(() -> this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":" +transactionAmount+ "}")).andReturn());
         });
 
+        //Act
         ExecutorService executorService = Executors.newFixedThreadPool(10);
-        executorService.invokeAll(calls);
+        List<Future<MvcResult>> results = executorService.invokeAll(calls);
 
+        //Assert
+        for(Future<MvcResult> result : results) {
+            Assert.assertEquals(HttpStatus.OK.value(), result.get().getResponse().getStatus());
+        }
         Assert.assertEquals(new BigDecimal(expected1Balance), this.accountsService.getAccount(ACC_ID_1).getBalance());
         Assert.assertEquals(new BigDecimal(expected2Balance), this.accountsService.getAccount(ACC_ID_2).getBalance());
     }
 
     @Test
     public void makeConcurrentTransactionBalanceShouldNotBeLessThanZero() throws Exception {
+        //Arrange
         int transactionAmount = 40;
         int expected1Balance = 0;
         int expected2Balance = INITIAL_BAL * 2;
 
-        Collection<Callable<ResultActions>> calls = new ArrayList<>();
+        Collection<Callable<MvcResult>> calls = new ArrayList<>();
         IntStream.rangeClosed(1,MAX_CALLS).forEach(i -> {
-            calls.add(() -> this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":" +transactionAmount+ "}")));
+            calls.add(() -> this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":" +transactionAmount+ "}")).andReturn());
         });
 
+        //Act
         ExecutorService executorService = Executors.newFixedThreadPool(10);
-        List<Future<ResultActions>> results = executorService.invokeAll(calls);
+        List<Future<MvcResult>> results = executorService.invokeAll(calls);
 
         int count = 0;
-        for(Future<ResultActions> action : results) {
-            if(action.get().andReturn().getResponse().getContentAsString().equals("Insufficient Account Balance.")) {
+        for(Future<MvcResult> result : results) {
+            TransactionDetails detail = fromJson(result.get().getResponse().getContentAsString());
+            if(detail.getMessage().equals("Insufficient Account Balance.")) {
                 count++;
             }
         }
+
+        //Assert
         Assert.assertEquals(5, count);
         Assert.assertEquals(new BigDecimal(expected1Balance), this.accountsService.getAccount(ACC_ID_1).getBalance());
         Assert.assertEquals(new BigDecimal(expected2Balance), this.accountsService.getAccount(ACC_ID_2).getBalance());
@@ -153,41 +199,47 @@ public class TransactionControllerTest {
 
     @Test
     public void makeConcurrentTransactionsInvalidAccountId() throws Exception {
+        //Arrange
         int transactionAmount = 40;
         int expected1Balance = INITIAL_BAL;
 
-        Collection<Callable<ResultActions>> calls = new ArrayList<>();
+        Collection<Callable<MvcResult>> calls = new ArrayList<>();
         IntStream.rangeClosed(1,MAX_CALLS).forEach(i -> {
-            calls.add(() -> this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"from\":\"1\",\"to\":\"4\",\"amount\":" +transactionAmount+ "}")));
+            calls.add(() -> this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"from\":\"1\",\"to\":\"4\",\"amount\":" +transactionAmount+ "}")).andReturn());
         });
 
+        //Act
         ExecutorService executorService = Executors.newFixedThreadPool(10);
-        List<Future<ResultActions>> results = executorService.invokeAll(calls);
+        List<Future<MvcResult>> results = executorService.invokeAll(calls);
 
         int count = 0;
-        for(Future<ResultActions> action : results) {
-            if(action.get().andReturn().getResponse().getContentAsString().equals("Account does not exists for id = 4")) {
+        for(Future<MvcResult> result : results) {
+            TransactionDetails detail = fromJson(result.get().getResponse().getContentAsString());
+            if(detail.getMessage().equals("Account does not exists for id = 4")) {
                 count++;
             }
         }
+
+        //Assert
         Assert.assertEquals(MAX_CALLS, count);
         Assert.assertEquals(new BigDecimal(expected1Balance), this.accountsService.getAccount(ACC_ID_1).getBalance());
     }
 
     @Test
     public void makeConcurrentTransactionCallsFromDifferentAccountsToSameAccount() throws Exception {
+        //Arrange
         int transactionAmount = 5;
         int expected1Balance = INITIAL_BAL + 2 * transactionAmount * MAX_CALLS;
         int expected2Balance = INITIAL_BAL - transactionAmount * MAX_CALLS;
         int expected3Balance = INITIAL_BAL - transactionAmount * MAX_CALLS;
 
-        Collection<Callable<ResultActions>> calls = new ArrayList<>();
+        Collection<Callable<MvcResult>> calls = new ArrayList<>();
         IntStream.rangeClosed(1, MAX_CALLS).forEach(i -> {
-            calls.add(() -> this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"from\":\"2\",\"to\":\"1\",\"amount\":"+transactionAmount+"}")));
-            calls.add(() -> this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"from\":\"3\",\"to\":\"1\",\"amount\":"+transactionAmount+"}")));
+            calls.add(() -> this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"from\":\"2\",\"to\":\"1\",\"amount\":"+transactionAmount+"}")).andReturn());
+            calls.add(() -> this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"from\":\"3\",\"to\":\"1\",\"amount\":"+transactionAmount+"}")).andReturn());
         });
 
         ExecutorService executorService = Executors.newFixedThreadPool(10);
@@ -200,22 +252,25 @@ public class TransactionControllerTest {
 
     @Test
     public void makeConcurrentTransactionCallsFromSingleAccountToDifferentAccounts() throws Exception {
+        //Arrange
         int transactionAmount = 5;
         int expected1Balance = INITIAL_BAL - 2 * transactionAmount * MAX_CALLS;
         int expected2Balance = INITIAL_BAL + transactionAmount * MAX_CALLS;
         int expected3Balance = INITIAL_BAL + transactionAmount * MAX_CALLS;
 
-        Collection<Callable<ResultActions>> calls = new ArrayList<>();
+        Collection<Callable<MvcResult>> calls = new ArrayList<>();
         IntStream.rangeClosed(1, MAX_CALLS).forEach(i -> {
-            calls.add(() -> this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":"+transactionAmount+"}")));
-            calls.add(() -> this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"from\":\"1\",\"to\":\"3\",\"amount\":"+transactionAmount+"}")));
+            calls.add(() -> this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":"+transactionAmount+"}")).andReturn());
+            calls.add(() -> this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"from\":\"1\",\"to\":\"3\",\"amount\":"+transactionAmount+"}")).andReturn());
         });
 
+        //Act
         ExecutorService executorService = Executors.newFixedThreadPool(10);
         executorService.invokeAll(calls);
 
+        //Assert
         Assert.assertEquals(new BigDecimal(expected1Balance), this.accountsService.getAccount(ACC_ID_1).getBalance());
         Assert.assertEquals(new BigDecimal(expected2Balance), this.accountsService.getAccount(ACC_ID_2).getBalance());
         Assert.assertEquals(new BigDecimal(expected3Balance), this.accountsService.getAccount(ACC_ID_3).getBalance());
@@ -223,21 +278,24 @@ public class TransactionControllerTest {
 
     @Test
     public void makeConcurrentTransactionCallsToAndFromAccounts() throws Exception {
+        //Arrange
         int transactionAmount = 5;
         int expected1Balance = INITIAL_BAL;
         int expected2Balance = INITIAL_BAL;
 
-        Collection<Callable<ResultActions>> calls = new ArrayList<>();
+        Collection<Callable<MvcResult>> calls = new ArrayList<>();
         IntStream.rangeClosed(1, MAX_CALLS).forEach(i -> {
-            calls.add(() -> this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":"+transactionAmount+"}")));
-            calls.add(() -> this.mockMvc.perform(post("/v1/transaction").contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"from\":\"2\",\"to\":\"1\",\"amount\":"+transactionAmount+"}")));
+            calls.add(() -> this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"from\":\"1\",\"to\":\"2\",\"amount\":"+transactionAmount+"}")).andReturn());
+            calls.add(() -> this.mockMvc.perform(post("/v1/transaction/transfer").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"from\":\"2\",\"to\":\"1\",\"amount\":"+transactionAmount+"}")).andReturn());
         });
 
+        //Act
         ExecutorService executorService = Executors.newFixedThreadPool(10);
         executorService.invokeAll(calls);
 
+        //Assert
         Assert.assertEquals(new BigDecimal(expected1Balance), this.accountsService.getAccount(ACC_ID_1).getBalance());
         Assert.assertEquals(new BigDecimal(expected2Balance), this.accountsService.getAccount(ACC_ID_2).getBalance());
     }

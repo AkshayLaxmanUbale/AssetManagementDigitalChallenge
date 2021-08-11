@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 import org.hibernate.validator.constraints.NotEmpty;
 
+import javax.validation.constraints.DecimalMin;
 import javax.validation.constraints.Min;
 import javax.validation.constraints.NotNull;
 import java.math.BigDecimal;
@@ -21,7 +22,7 @@ public class Transaction {
     private String receiverId;
 
     @NotNull
-    @Min(value = 0, message = "Transfer amount should be greater than 0.")
+    @DecimalMin(value = "0.1", message = "Transfer amount should be greater than 0.")
     private BigDecimal amount;
 
     public Transaction() {

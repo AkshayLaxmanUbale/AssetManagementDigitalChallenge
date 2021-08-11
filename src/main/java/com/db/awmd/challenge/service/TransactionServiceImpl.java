@@ -2,13 +2,13 @@ package com.db.awmd.challenge.service;
 
 import com.db.awmd.challenge.domain.Account;
 import com.db.awmd.challenge.domain.Transaction;
+import com.db.awmd.challenge.domain.TransactionDetails;
 import com.db.awmd.challenge.exception.InsufficientBalanceException;
 import com.db.awmd.challenge.exception.InvalidAccountException;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -19,7 +19,7 @@ public class TransactionServiceImpl implements TransactionService {
     private final NotificationService notificationService;
 
     @Override
-    public void transfer(Transaction transaction) throws InsufficientBalanceException {
+    public TransactionDetails transferAmount(Transaction transaction) throws InsufficientBalanceException {
         //Validate accounts
         Account sender = accountsService.getAccount(transaction.getSenderId());
         if(sender == null) {
@@ -35,8 +35,17 @@ public class TransactionServiceImpl implements TransactionService {
 
         receiver.credit(transaction.getAmount());
 
+        //Create random transactionId
+        TransactionDetails transactionDetails = TransactionDetails.builder()
+                .transactionId(UUID.randomUUID().toString())
+                .transaction(transaction)
+                .message("Transaction Successful!!")
+                .build();
+
         //Notify
         notificationService.notifyAboutTransfer(sender, String.format("Debited %s amount!!", transaction.getAmount()));
         notificationService.notifyAboutTransfer(receiver, String.format("Credited %s amount!!", transaction.getAmount()));
+
+        return transactionDetails;
     }
 }

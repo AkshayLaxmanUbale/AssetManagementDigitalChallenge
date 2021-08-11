@@ -2,10 +2,9 @@ package com.db.awmd.challenge.service;
 
 import com.db.awmd.challenge.domain.Account;
 import com.db.awmd.challenge.domain.Transaction;
+import com.db.awmd.challenge.domain.TransactionDetails;
 import com.db.awmd.challenge.exception.InsufficientBalanceException;
 import com.db.awmd.challenge.exception.InvalidAccountException;
-import com.db.awmd.challenge.repository.AccountsRepositoryInMemory;
-import junit.framework.TestCase;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -20,10 +19,11 @@ import org.springframework.test.context.junit4.SpringRunner;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.stream.IntStream;
+import java.util.concurrent.Future;
 
 @RunWith(SpringRunner.class)
 @SpringBootTest
@@ -89,7 +89,6 @@ public class TransactionServiceImplTest {
 
         //Act
         this.accountsService.getAccount(ACC_ID_1).debit(withdrawAmt);
-
     }
 
     @Test
@@ -100,7 +99,7 @@ public class TransactionServiceImplTest {
         Transaction transaction = new Transaction(ACC_ID_1, ACC_ID_2, new BigDecimal(100));
 
         //Act
-        this.transactionService.transfer(transaction);
+        this.transactionService.transferAmount(transaction);
 
         //Assert
         Assert.assertEquals(expected1, this.accountsService.getAccount("1").getBalance());
@@ -114,50 +113,51 @@ public class TransactionServiceImplTest {
         Transaction transaction = new Transaction(INVALID_ID, ACC_ID_2, new BigDecimal(100));
 
         //Act
-        this.transactionService.transfer(transaction);
-
+        this.transactionService.transferAmount(transaction);
     }
 
     @Test
     public void transferConcurrentWithSameSenderAndSameReceivers() throws Exception {
+        //Arrange
         Transaction transaction1 = new Transaction(ACC_ID_1, ACC_ID_2, new BigDecimal(100));
         Transaction transaction2 = new Transaction(ACC_ID_1, ACC_ID_2, new BigDecimal(100));
 
         ExecutorService executorService = Executors.newFixedThreadPool(2);
-        Collection<Callable<Integer>> calls = new ArrayList<>();
-        calls.add(() -> {
-            this.transactionService.transfer(transaction1);
-            return 1;
-        });
-        calls.add(() -> {
-            this.transactionService.transfer(transaction2);
-            return 1;
-        });
+        Collection<Callable<TransactionDetails>> calls = new ArrayList<>();
+        calls.add(() -> this.transactionService.transferAmount(transaction1));
+        calls.add(() -> this.transactionService.transferAmount(transaction2));
 
-        executorService.invokeAll(calls);
+        //Act
+        List<Future<TransactionDetails>> results = executorService.invokeAll(calls);
 
+        //Assert
+        for(Future<TransactionDetails> detail : results) {
+            Assert.assertNotNull(detail.get());
+            Assert.assertNotNull(detail.get().getTransactionId());
+        }
         Assert.assertEquals(this.accountsService.getAccount(ACC_ID_1).getBalance(), new BigDecimal(1800));
         Assert.assertEquals(this.accountsService.getAccount(ACC_ID_2).getBalance(), new BigDecimal(2200));
     }
 
     @Test
     public void transferConcurrentSenderToReceiverAndViceVersa() throws Exception {
+        //Arrange
         Transaction transaction1 = new Transaction(ACC_ID_1, ACC_ID_2, new BigDecimal(100));
         Transaction transaction2 = new Transaction(ACC_ID_2, ACC_ID_1, new BigDecimal(100));
 
         ExecutorService executorService = Executors.newFixedThreadPool(2);
-        Collection<Callable<Integer>> calls = new ArrayList<>();
-        calls.add(() -> {
-            this.transactionService.transfer(transaction1);
-            return 1;
-        });
-        calls.add(() -> {
-            this.transactionService.transfer(transaction2);
-            return 1;
-        });
+        Collection<Callable<TransactionDetails>> calls = new ArrayList<>();
+        calls.add(() -> this.transactionService.transferAmount(transaction1));
+        calls.add(() -> this.transactionService.transferAmount(transaction2));
 
-        executorService.invokeAll(calls);
+        //Act
+        List<Future<TransactionDetails>> results = executorService.invokeAll(calls);
 
+        //Assert
+        for(Future<TransactionDetails> detail : results) {
+            Assert.assertNotNull(detail.get());
+            Assert.assertNotNull(detail.get().getTransactionId());
+        }
         Assert.assertEquals(this.accountsService.getAccount(ACC_ID_1).getBalance(), new BigDecimal(2000));
         Assert.assertEquals(this.accountsService.getAccount(ACC_ID_2).getBalance(), new BigDecimal(2000));
     }

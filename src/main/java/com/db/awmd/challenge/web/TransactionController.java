@@ -1,6 +1,7 @@
 package com.db.awmd.challenge.web;
 
 import com.db.awmd.challenge.domain.Transaction;
+import com.db.awmd.challenge.domain.TransactionDetails;
 import com.db.awmd.challenge.exception.InsufficientBalanceException;
 import com.db.awmd.challenge.exception.InvalidAccountException;
 import com.db.awmd.challenge.service.TransactionService;
@@ -25,24 +26,26 @@ public class TransactionController {
         this.transactionService = transactionService;
     }
 
-    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<Object> transact(@RequestBody @Valid Transaction transaction) {
+    @PostMapping(path = "/transfer",consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<TransactionDetails> transact(@RequestBody @Valid Transaction transaction) {
         log.info("Starting transaction {}", transaction);
 
         try {
-            this.transactionService.transfer(transaction);
+            TransactionDetails details = this.transactionService.transferAmount(transaction);
+            log.info("Transaction Completed Successfully : {}", transaction);
+            return new ResponseEntity<TransactionDetails>(details ,HttpStatus.OK);
+
         } catch (InvalidAccountException iae) {
             log.error("Error for transaction {} : {}", transaction, iae);
-            return new ResponseEntity<>(iae.getMessage(), HttpStatus.NOT_FOUND);
+            return new ResponseEntity<TransactionDetails>(TransactionDetails.builder().message(iae.getMessage()).build(), HttpStatus.NOT_FOUND);
+
         } catch (InsufficientBalanceException ibe) {
             log.error("Error for transaction {} : {}", transaction, ibe);
-            return new ResponseEntity<>(ibe.getMessage(), HttpStatus.BAD_REQUEST);
+            return new ResponseEntity<TransactionDetails>(TransactionDetails.builder().message(ibe.getMessage()).build(), HttpStatus.BAD_REQUEST);
+
         } catch (Exception ex) {
             log.error("Error for transaction {} : {}", transaction, ex);
-            return new ResponseEntity<>(ex.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+            return new ResponseEntity<TransactionDetails>(TransactionDetails.builder().message(ex.getMessage()).build(), HttpStatus.INTERNAL_SERVER_ERROR);
         }
-
-        log.info("Transaction Completed Successfully : {}", transaction);
-        return new ResponseEntity<>(HttpStatus.OK);
     }
 }

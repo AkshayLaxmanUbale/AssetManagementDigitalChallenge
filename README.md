@@ -2,7 +2,7 @@
 
 #### Endpoint :
 
-    http://<base_address>:<port>/v1/transaction
+    http://<base_address>:<port>/v1/transaction/transfer
     METHOD: POST
     PAYLOAD : 
     {
