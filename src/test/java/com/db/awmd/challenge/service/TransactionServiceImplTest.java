@@ -116,6 +116,15 @@ public class TransactionServiceImplTest {
         this.transactionService.transferAmount(transaction);
     }
 
+    @Test(expected = InvalidAccountException.class)
+    public void transferWithinSameAccount() {
+        //Arrange
+        Transaction transaction = new Transaction(ACC_ID_1, ACC_ID_1, new BigDecimal(100));
+
+        //Act
+        this.transactionService.transferAmount(transaction);
+    }
+
     @Test
     public void transferConcurrentWithSameSenderAndSameReceivers() throws Exception {
         //Arrange

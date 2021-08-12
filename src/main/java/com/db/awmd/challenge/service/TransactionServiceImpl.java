@@ -31,6 +31,11 @@ public class TransactionServiceImpl implements TransactionService {
             throw new InvalidAccountException(String.format("Account does not exists for id = %s", transaction.getReceiverId()));
         }
 
+        //Same account transfer not allowed.
+        if(sender.getAccountId().equals(receiver.getAccountId())) {
+            throw new InvalidAccountException("Same Account transfer not supported.");
+        }
+
         sender.debit(transaction.getAmount());
 
         receiver.credit(transaction.getAmount());
